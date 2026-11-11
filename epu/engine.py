@@ -9,6 +9,7 @@ the office never claims work it did not do.
 from __future__ import annotations
 
 import re
+import subprocess
 import time
 from pathlib import Path
 
@@ -49,11 +50,17 @@ _FIX = re.compile(
     r"(?P<target>[a-z][\w\s./-]{0,40}?)\s*[.!]?$"
     r"|^(?:please\s+)?(?:your\s+|the\s+)?(?P<bare>memory|brain)\s+(?:is\s+)?"
     r"(?:broken|not\s+working)\s*[.!]?$", re.I)
+_SECURITY = re.compile(
+    r"^(?:please\s+)?(?:security\s+check|check\s+(?:my\s+)?security|is\s+(?:my\s+)?pc\s+safe|"
+    r"who\s+is\s+(?:watching|listening)\s+(?:me|my\s+pc)|am\s+i\s+safe)", re.I)
 _SITE = re.compile(
     r"^(?:please\s+)?(?:check|test|scan|is|how\s+is)\s+(?:my\s+)?"
     r"(?:site|website|domain)\s+(?P<host>[a-z0-9.-]+\.[a-z]{2,})", re.I)
 _SITES = re.compile(r"^(?:please\s+)?(?:list|show)\s+(?:my\s+)?(?:sites?|websites?|clients?)\s*$",
                     re.I)
+_SECURITY = re.compile(
+    r"^(?:please\s+)?(?:security\s+check|check\s+(?:my\s+)?security|is\s+(?:my\s+)?pc\s+safe|"
+    r"who\s+is\s+(?:watching|listening|connected)\s+(?:me|my\s+pc)|am\s+i\s+safe)", re.I)
 _MEMORY_TARGETS = {"memory", "your memory", "my memory", "the memory", "brain", "your brain",
                    "memory index", "the memory index", "the search index", "search index",
                    "the database", "database", "short term memory", "chat memory"}
@@ -90,6 +97,16 @@ def _inside_office(path: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _allowed_to_read(rel: str) -> bool:
+    """Only the folders the owner listed in config/office.json may be read.
+
+    This is the guard that keeps the office from reading its own secrets: `secure/`
+    is not a read root, and no order wording can talk past a list.
+    """
+    top = rel.replace("\\", "/").lstrip("/").split("/")[0] if rel else ""
+    return top in tuple(policy()["read_roots"])
 
 
 def _location_free(text: str) -> str:
@@ -164,8 +181,9 @@ def plan(text: str, scope: str = "owner") -> list[dict]:
         return [{"tool": "check_site", "args": {"host": m.group("host")}}]
     if _SITES.match(t):
         return [{"tool": "list_sites", "args": {}}]
+    if _SECURITY.match(t):
+        return [{"tool": "security_check", "args": {}}]
     return []
-
 
 # ------------------------------------------------------------------ the tools
 def _tool_make_folder(mem: memory.Memory, args: dict) -> dict:
@@ -191,6 +209,8 @@ def _tool_write_file(mem: memory.Memory, args: dict) -> dict:
 
 def _tool_list_dir(mem: memory.Memory, args: dict) -> dict:
     rel = clean_path(args.get("path", "projects"))
+    if not _allowed_to_read(rel):
+        return {"ok": False, "error": f"{rel} is outside the folders I may read, sir"}
     target = ROOT / rel
     if not target.is_dir():
         return {"ok": False, "error": f"no such folder: {rel}"}
@@ -201,8 +221,10 @@ def _tool_list_dir(mem: memory.Memory, args: dict) -> dict:
 
 def _tool_read_file(mem: memory.Memory, args: dict) -> dict:
     rel = clean_path(args.get("path", ""))
+    if not _allowed_to_read(rel):
+        return {"ok": False, "error": f"{rel} is outside the folders I may read, sir"}
     target = ROOT / rel
-    if not target.is_file() or not _inside_office(target):
+    if not target.is_file():
         return {"ok": False, "error": f"no such file: {rel}"}
     if target.stat().st_size > 2_000_000:
         return {"ok": False, "error": f"{rel} is too large (limit 2 MB)"}
@@ -229,8 +251,11 @@ def _tool_rename(mem: memory.Memory, args: dict) -> dict:
 def _tool_search_files(mem: memory.Memory, args: dict) -> dict:
     import fnmatch
 
-    base = ROOT / clean_path(args.get("root", "projects"))
-    if not base.is_dir() or not _inside_office(base):
+    rel = clean_path(args.get("root", "projects"))
+    if not _allowed_to_read(rel):
+        return {"ok": False, "error": f"{rel} is outside the folders I may read, sir"}
+    base = ROOT / rel
+    if not base.is_dir():
         return {"ok": False, "error": f"no such folder: {args.get('root')}"}
     out = [str(p.relative_to(ROOT)).replace("\\", "/")
            for p in sorted(base.rglob("*"))
@@ -304,6 +329,74 @@ def _tool_list_sites(mem: memory.Memory, _args: dict) -> dict:
     return {"ok": True, "sites": rows}
 
 
+def _tool_security_check(mem: memory.Memory, _args: dict) -> dict:
+    """Who is on this machine and who it talks to: real processes, connections, defender."""
+    import psutil
+
+    mine, listening, outbound, unknown = [], [], [], []
+    own_markers = ("EPU", "epu", "OpenJarvis", "openjarvis", "ollama")
+    try:
+        for proc in psutil.process_iter(["name", "exe", "cmdline"]):
+            name = proc.info.get("name") or ""
+            cmdline = " ".join(proc.info.get("cmdline") or [])
+            if any(marker.lower() in (name + " " + cmdline).lower() for marker in own_markers):
+                mine.append(f"{name} ({proc.pid})")
+    except Exception:
+        pass
+    try:
+        for conn in psutil.net_connections(kind="inet"):
+            if conn.status == psutil.CONN_LISTEN and conn.laddr:
+                port = conn.laddr.port
+                bind = conn.laddr.ip
+                if port in (8790, 8792, 8799):
+                    listening.append(f"{bind}:{port}")
+                elif bind in ("0.0.0.0", "::"):
+                    unknown.append(str(port))
+    except Exception:
+        pass
+    try:
+        for conn in psutil.net_connections(kind="inet"):
+            if conn.status == psutil.CONN_ESTABLISHED and conn.raddr:
+                ip = conn.raddr.ip
+                if ip and not ip.startswith(("127.", "0.0.0.0", "::", "fe80:", "192.168.",
+                                            "10.", "172.")):
+                    outbound.append(ip)
+    except Exception:
+        outbound = sorted(set(outbound))
+    defender = _defender_status()
+    report = {"office_listening": sorted(set(listening)),
+              "other_ports_on_ini": sorted(set(unknown))[:12],
+              "outbound_hosts": sorted(set(outbound))[:12],
+              "office_processes": mine[:8],
+              "windows_defender": defender,
+              "local_network_peers": _lan_peers()}
+    mem.log_job("security_check", True, "")
+    return {"ok": True, **report}
+
+
+def _defender_status() -> str:
+    """Real Defender state, from Windows itself."""
+    code = subprocess.run(["powershell", "-NoProfile", "-Command",
+                           "(Get-MpComputerStatus).RealTimeProtectionEnabled"],
+                          capture_output=True, text=True, timeout=60)
+    if code.returncode == 0 and code.stdout.strip().lower() == "true":
+        return "ON (real-time protection)"
+    if code.returncode == 0:
+        return "OFF"
+    return "unknown"
+
+
+def _lan_peers() -> list[str]:
+    """Who else is on this network: the other computers, from the ARP table."""
+    code = subprocess.run(["arp", "-a"], capture_output=True, text=True, timeout=30)
+    peers = []
+    for line in (code.stdout or "").splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[0].startswith("192.168."):
+            peers.append(parts[0])
+    return sorted(set(peers))
+
+
 def _tool_memory_repair(mem: memory.Memory, _args: dict) -> dict:
     return {"ok": True, **mem.repair()}
 
@@ -335,6 +428,7 @@ TOOLS = {
     "memory_repair": _tool_memory_repair,
     "check_site": _tool_check_site,
     "list_sites": _tool_list_sites,
+    "security_check": _tool_security_check,
     "pc_health": _tool_pc_health,
     # A protected-folder order is refused in code, before any tool runs: the owner
     # gets the reason, and nothing is claimed or touched.
@@ -403,6 +497,20 @@ def describe(tool: str, result: dict, args: dict) -> str:
         sites = result.get("sites") or []
         return ", ".join(f"{s['title']} ({s['site']}) in {s['folder']}" for s in sites) \
             if sites else "no sites recorded yet, sir"
+    if tool == "security_check":
+        parts = [f"Windows Defender {result.get('windows_defender', 'unknown')}, sir."]
+        office_ports = ", ".join(result.get("office_listening") or []) or "nothing"
+        parts.append(f"EPU listens on {office_ports}.")
+        peers = result.get("local_network_peers") or []
+        parts.append(f"{len(peers)} other device(s) on your network"
+                     + (f": {', '.join(peers[:6])}" if peers else ""))
+        other = result.get("other_ports_on_ini") or []
+        if other:
+            parts.append(f"other open ports belong to Windows, not to me: "
+                         f"{', '.join(str(p) for p in other[:8])}")
+        worker = ", ".join(result.get("office_processes") or []) or "none"
+        parts.append(f"my own programs: {worker}")
+        return " ".join(parts)
     return f"{tool} done"
 
 

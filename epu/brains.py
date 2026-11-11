@@ -56,21 +56,34 @@ def _local_reply(body: str, prompt: str, mem: memory.Memory, history: list) -> d
 
 def ask(text: str, *, scope: str = "owner", mem: memory.Memory | None = None,
         history: list | None = None) -> dict:
-    """One question, one answer: try the best healthy model, be honest when none is up."""
+    """One question, one answer: cloud first (fast, light), local when the owner wants it."""
     global _last_winner
 
     settings = config.settings()
     prompt = system_prompt(scope, mem, text)
     history = [{"role": h["role"], "content": h["content"]} for h in (history or [])]
 
-    providers = sorted(config.cloud_ready(), key=lambda p: p.get("priority", 5))
-    if settings["providers"].get("local_enabled") and settings["providers"]["default"] == "local":
-        return _local_reply(text, prompt, mem, history)
+    # Local first only when the owner switched the order explicitly.
+    if config.local_model_enabled():
+        local = settings["providers"].get("local_jobs") or []
+        local.sort(key=lambda p: p.get("priority", 7))
+        for engine in local:
+            model = os.environ.get(engine.get("model_env", ""), "") or engine.get("model", "")
+            result = _ask_openai_compatible(engine, model, prompt, history, text)
+            if result.get("ok"):
+                return result
 
-    if not providers:
+    providers = sorted(config.cloud_ready(), key=lambda p: p.get("priority", 5))
+    if not providers and not config.local_model_enabled():
         return {"ok": False,
                 "reply": "Yes sir, I have no cloud key yet. Put the key in "
                          "secure/keys.env (owner-only) and I answer in under a second.",
+                "provider": "office", "model": "none"}
+
+    if not providers:
+        return {"ok": False,
+                "reply": "Yes sir, no cloud model is configured and no local engine is on. "
+                         "Say 'turn on the local model' and OpenJarvis answers.",
                 "provider": "office", "model": "none"}
 
     tried = []
@@ -78,7 +91,7 @@ def ask(text: str, *, scope: str = "owner", mem: memory.Memory | None = None,
         key = config.provider_key(provider)
         base = provider.get("base", "https://api.openai.com/v1")
         for model in provider.get("models", []):
-            if _sick(model) or (_last_winner and _last_winner != model and _fused):
+            if _sick(model):
                 tried.append(f"{model} (cooling)")
                 continue
             payload = {"model": model,
@@ -103,12 +116,43 @@ def ask(text: str, *, scope: str = "owner", mem: memory.Memory | None = None,
                 _mark(model, False)
                 tried.append(f"{model} {type(exc).__name__}")
 
+    # No cloud answer: a local engine is better than an invented one.
     if config.local_model_enabled():
-        return _local_reply(text, prompt, mem, history)
+        for engine in sorted((settings["providers"].get("local_jobs") or []),
+                             key=lambda p: p.get("priority", 7)):
+            model = os.environ.get(engine.get("model_env", ""), "") or engine.get("model", "")
+            result = _ask_openai_compatible(engine, model, prompt, history, text)
+            if result.get("ok"):
+                return result
     return {"ok": False,
             "reply": "Yes sir, no cloud model answered right now (" +
                      "; ".join(tried[:3]) + "). I am not guessing an answer.",
             "provider": "office", "model": "none"}
+
+
+def _ask_openai_compatible(engine: dict, model: str, prompt: str, history: list,
+                           text: str) -> dict:
+    """A local brain (OpenJarvis or Ollama): same HTTP shape, no cloud key."""
+    base = engine.get("base", "http://127.0.0.1:11434/v1")
+    payload = {"model": model, "max_tokens": int(engine.get("max_tokens", 1024)),
+               "temperature": float(engine.get("temperature", 0.3)), "stream": False,
+               "messages": [{"role": "system", "content": prompt}] + history +
+                           [{"role": "user", "content": text}]}
+    try:
+        data = _post(f"{base}/chat/completions", "", payload,
+                     int(engine.get("timeout_s", 120)))
+        reply = (data["choices"][0]["message"]["content"] or "").strip()
+        if not reply:
+            return {"ok": False, "reply": "", "error": "the local model said nothing",
+                    "provider": engine.get("id", "local"), "model": model}
+        _mark(model, True)
+        return {"ok": True, "reply": reply, "provider": engine.get("id", "local"),
+                "model": model}
+    except Exception as exc:
+        _mark(model, False)
+        return {"ok": False, "reply": "",
+                "error": f"{engine.get('label', 'local engine')} is not answering ({exc})",
+                "provider": engine.get("id", "local"), "model": model}
 
 
 def system_prompt(scope: str, mem: memory.Memory | None, text: str) -> str:

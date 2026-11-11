@@ -18,6 +18,20 @@
       "base": "http://127.0.0.1:11434",
       "model": "qwen2.5:1.5b-instruct"
     },
+    "local_jobs": [
+      {
+        "id": "openjarvis",
+        "label": "OpenJarvis (local brains)",
+        "base": "http://127.0.0.1:11434/v1",
+        "model_env": "EPU_OPENJARVIS_MODEL",
+        "model": "qwen3.5:2b",
+        "priority": 7,
+        "max_tokens": 1024,
+        "temperature": 0.3,
+        "timeout_s": 120,
+        "note": "OpenJarvis serves an OpenAI-compatible endpoint; turn it on with EPU_LOCAL=1"
+      }
+    ],
     "cloud": [
       {
         "id": "nvidia",

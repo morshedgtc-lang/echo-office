@@ -193,8 +193,15 @@ class Memory:
             except sqlite3.Error:
                 return False
 
-    def recent(self, chat_id: str, n: int = 6) -> list[sqlite3.Row]:
+    def recent(self, chat_id: str, n: int = 6, scope: str | None = None) -> list[sqlite3.Row]:
+        """Recent conversation for one chat. `scope` keeps client A out of client B:
+        a scope is a wall, not a filter."""
         try:
+            if scope:
+                return self.db.execute(
+                    "SELECT role, content, created FROM chat "
+                    "WHERE chat_id=? AND scope=? ORDER BY id DESC LIMIT ?",
+                    (chat_id or "main", scope, max(1, n))).fetchall()[::-1]
             return self.db.execute(
                 "SELECT role, content, created FROM chat WHERE chat_id=? ORDER BY id DESC LIMIT ?",
                 (chat_id or "main", max(1, n))).fetchall()[::-1]

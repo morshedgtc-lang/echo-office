@@ -10,6 +10,7 @@ Budget, in milliseconds, from config/office.json:
 
 from __future__ import annotations
 
+import os
 import re
 import time
 
@@ -137,7 +138,7 @@ def answer(text: str, *, chat_id: str = "hud", agent: str = "you",
                                  ms=int((time.time() - started) * 1000)))
 
         # 4) an order — planned and executed here, verified on disk
-        if is_order(body):
+        if is_order(body) or engine.plan(body, scope=scope):
             mem.add_chat(chat_id, "owner", body, scope)
             result = engine.run(body, mem, scope=scope)
             if result.get("reply"):
@@ -152,11 +153,11 @@ def answer(text: str, *, chat_id: str = "hud", agent: str = "you",
                                  ok=bool(result.get("ok")),
                                  ms=int((time.time() - started) * 1000)))
 
-        # 5) a real question — the cloud brain, or an honest line without a key
+        # 5) a real question — the cloud brain, or an honest line without no key
         mem.add_chat(chat_id, "owner", body, scope)
         from . import brains
 
-        result = brains.ask(body, scope=scope, mem=mem, history=mem.recent(chat_id, 4))
+        result = brains.ask(body, scope=scope, mem=mem, history=mem.recent(chat_id, 4, scope))
         reply = result.get("reply") or ""
         mem.add_chat(chat_id, "assistant", reply, scope)
         return finish(Answer(reply, kind="question", provider=result.get("provider", "office"),
