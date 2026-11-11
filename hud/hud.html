@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EPU // AI Office</title>
+<link rel="stylesheet" href="/hud/hud.css">
+</head>
+<body>
+<main class="hud">
+  <header class="hud-head">
+    <div class="brand">
+      <span class="dot" id="dot"></span>
+      <strong>EPU</strong> <span class="muted">// AI OFFICE</span>
+    </div>
+    <div class="head-right">
+      <span class="chip" id="stat-memory">memory</span>
+      <span class="chip" id="stat-tasks">tasks</span>
+      <span class="chip" id="stat-cloud">cloud</span>
+      <span class="clock" id="clock"></span>
+    </div>
+  </header>
+
+  <section class="panels">
+    <div class="card">
+      <h2>OWNER</h2>
+      <p class="name">Mohammad Morshed <span class="muted">(sir / boss)</span></p>
+      <dl class="facts">
+        <dt>FACE</dt><dd id="face-state">not enrolled</dd>
+        <dt>VOICE</dt><dd id="voice-state">not enrolled</dd>
+        <dt>CLOUD</dt><dd id="cloud-state">-</dd>
+        <dt>LOCAL MODEL</dt><dd id="local-state">off</dd>
+      </dl>
+    </div>
+
+    <div class="card">
+      <h2>BIOMETRICS</h2>
+      <div class="row">
+        <button id="btn-face-enrol" class="btn">FACE: ENROL</button>
+        <button id="btn-face-verify" class="btn">FACE: VERIFY</button>
+      </div>
+      <div class="row">
+        <button id="btn-voice-enrol" class="btn">VOICE: ENROL</button>
+        <button id="btn-voice-verify" class="btn">VOICE: VERIFY</button>
+      </div>
+      <video id="cam" playsinline muted></video>
+      <p class="hint" id="bio-hint">Face and voice are learned on this PC only. No photo is kept, only a 200x200 face crop and a 13-number voice print.</p>
+    </div>
+
+    <div class="card">
+      <h2>CREW</h2>
+      <ul class="crew">
+        <li><b>EPU</b> coordinator</li>
+        <li><b>you</b> the whole office</li>
+      </ul>
+      <p class="hint">More crew slots (JARVIS for code, FRIDAY for ops, EDITH for security, DUME for files, VISION for UI) come with the next build step.</p>
+    </div>
+  </section>
+
+  <section class="chat">
+    <div class="chatlog" id="log"></div>
+    <form class="composer" id="form">
+      <input id="input" autocomplete="off" placeholder="Order the crew… (Enter to send, Shift+Enter for a new line)">
+      <button type="button" class="btn" id="btn-record">RECORD</button>
+      <button type="button" class="btn" id="btn-speak">SPEAK: OFF</button>
+      <button class="btn send" id="btn-send" type="submit">SEND</button>
+    </form>
+  </section>
+</main>
+<script src="/hud/hud.js"></script>
+</body>
+</html>

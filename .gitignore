@@ -1,0 +1,22 @@
+# secrets and run state — never committed
+secure/
+run/
+logs/
+tmp/
+
+# memory databases (regenerable, but the owner may want to keep them)
+memory/*.sqlite
+memory/*.sqlite-wal
+memory/*.sqlite-shm
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# editors / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

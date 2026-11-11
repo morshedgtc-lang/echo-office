@@ -1,0 +1,97 @@
+{
+  "name": "EPU",
+  "owner_address": ["sir", "boss"],
+  "assistant_name": "EPU",
+
+  "bind": "127.0.0.1",
+  "ports": {
+    "hud": 8790,
+    "stream": 8792,
+    "api": 8791
+  },
+
+  "providers": {
+    "default": "cloud",
+    "local_enabled": false,
+    "local": {
+      "engine": "ollama",
+      "base": "http://127.0.0.1:11434",
+      "model": "qwen2.5:1.5b-instruct"
+    },
+    "cloud": [
+      {
+        "id": "nvidia",
+        "label": "NVIDIA NIM",
+        "base": "https://integrate.api.nvidia.com/v1",
+        "key_env": ["EPU_NVIDIA_KEY_1", "EPU_NVIDIA_KEY_2"],
+        "models": [
+          "nvidia/nemotron-3.5-bolt-e4b",
+          "poolside/laguna-xs-2.1",
+          "mistralai/mistral-large-4-1t-a52b"
+        ],
+        "priority": 5,
+        "max_tokens": 1024,
+        "temperature": 0.3,
+        "timeout_s": 20
+      }
+    ]
+  },
+
+  "policy": {
+    "max_tool_steps": 4,
+    "max_delegation_depth": 2,
+    "max_active_jobs": 3,
+    "chat": {
+      "greeting_ms_budget": 200,
+      "answer_ms_budget": 3000,
+      "short_term_items": 40,
+      "short_term_ttl_hours": 24,
+      "recall_k": 6
+    },
+    "levels": {"safe": 1, "controlled": 2, "sensitive": 3},
+    "high_risk_tools": ["write_file", "make_folder", "rename_file", "copy_file", "move_file", "shell"],
+    "always_denied": [
+      "rm\\s+-rf", "rmdir\\s+/s", "del\\s+/[sqf]", "format\\s+[a-z]:",
+      "diskpart", "vssadmin\\s+delete", "cipher\\s+/w", "reg\\s+delete", "bcdedit",
+      "shutdown", "restart\\s+/", ":(){:|:&};:"
+    ],
+    "allowed_commands": ["git", "python", "node", "npm", "pytest", "curl", "ping", "ipconfig", "nslookup"],
+    "read_roots": ["projects", "docs", "memory", "config"],
+    "write_roots": ["projects"]
+  },
+
+  "voice": {
+    "enabled": false,
+    "engine": "edge",
+    "lang": "auto",
+    "one_speaker": true
+  },
+
+  "projects": {
+    "easyphoneunlocker": {
+      "title": "easyphoneunlocker.com",
+      "kind": "client",
+      "memory_scope": "client:easyphoneunlocker",
+      "path": "projects/easyphoneunlocker",
+      "site": "https://easyphoneunlocker.com",
+      "hosting": "hostinger cloud business",
+      "dns": {
+        "nameservers": ["ns1.dns-parking.com", "ns2.dns-parking.com"],
+        "a": ["147.79.69.109", "93.127.173.40"]
+      }
+    },
+    "testing": {
+      "title": "EPU test site (free domain)",
+      "kind": "project",
+      "memory_scope": "client:testing",
+      "path": "projects/testing",
+      "site": "https://epu.us.kg",
+      "note": "free DigitalPlat domain for testing, registered by the owner; .com stays parked"
+    }
+  },
+
+  "external_reference_folders": [
+    "F:/oppo", "F:/realme flash file", "F:/iRemoveTools_A12_9.5_win",
+    "F:/UnlockTool-2026-11-05-0", "F:/UnlockTool_2026-10-31-0", "F:/TSM-PRO Edition"
+  ]
+}
