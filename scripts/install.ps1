@@ -132,8 +132,7 @@ if ($firstInstall) {
     # git refuses to merge over a file the owner edited, so the code comes from the
     # published zip instead. config/ is skipped there, so his edits are never touched.
     Write-Host "Office already here - config/office.json has your own edits, so the code " `
-        "is refreshed from the published zip (your config is not touched)"
-    Install-FromZip
+        "is refreshed from the published zip (your config is not touched)"    Install-FromZip
 } else {
     Write-Host "Office already here - updating the code from GitHub (git pull --ff-only)"
     $old = $ErrorActionPreference
@@ -193,14 +192,11 @@ $lastLine = @($testOut | Where-Object { "$_" -match '\S' } | Select-Object -Last
 Write-Host "  tests: $lastLine"
 
 # ------------------------------------------------------------------ the office itself
-$memDb = Join-Path $root 'memory\office.sqlite'
-if (-not (Test-Path $memDb)) {
-    python "$root\epu.py" init
-} else {
-    # A re-run reports the office and writes nothing new: memory/ and secure/ belong
-    # to the owner, and this installer never touches them.
-    python "$root\epu.py" doctor
-}
+# `init` only creates what is missing (folders, then the owner's identity facts), so
+# it is the same on a first install and on every re-run: nothing that exists is
+# rewritten. The office writes its own memory here; this installer never does.
+python "$root\epu.py" init
+python "$root\epu.py" doctor
 
 # The certificate lives in secure/ (owner-only) and is made only when it is missing.
 python -c "import sys; sys.path.insert(0, r'$root'); from epu import tlsutil; tlsutil.ensure_certificate()"
