@@ -11,13 +11,7 @@
   },
 
   "providers": {
-    "default": "cloud",
     "local_enabled": false,
-    "local": {
-      "engine": "ollama",
-      "base": "http://127.0.0.1:11434",
-      "model": "qwen2.5:1.5b-instruct"
-    },
     "local_jobs": [
       {
         "id": "openjarvis",
@@ -52,33 +46,13 @@
   },
 
   "policy": {
-    "max_tool_steps": 4,
-    "max_delegation_depth": 2,
-    "max_active_jobs": 3,
     "chat": {
-      "greeting_ms_budget": 200,
-      "answer_ms_budget": 3000,
       "short_term_items": 40,
       "short_term_ttl_hours": 24,
       "recall_k": 6
     },
-    "levels": {"safe": 1, "controlled": 2, "sensitive": 3},
-    "high_risk_tools": ["write_file", "make_folder", "rename_file", "copy_file", "move_file", "shell"],
-    "always_denied": [
-      "rm\\s+-rf", "rmdir\\s+/s", "del\\s+/[sqf]", "format\\s+[a-z]:",
-      "diskpart", "vssadmin\\s+delete", "cipher\\s+/w", "reg\\s+delete", "bcdedit",
-      "shutdown", "restart\\s+/", ":(){:|:&};:"
-    ],
-    "allowed_commands": ["git", "python", "node", "npm", "pytest", "curl", "ping", "ipconfig", "nslookup"],
     "read_roots": ["projects", "docs", "memory", "config"],
     "write_roots": ["projects"]
-  },
-
-  "voice": {
-    "enabled": false,
-    "engine": "edge",
-    "lang": "auto",
-    "one_speaker": true
   },
 
   "projects": {
@@ -104,8 +78,7 @@
     }
   },
 
-  "external_reference_folders": [
-    "F:/oppo", "F:/realme flash file", "F:/iRemoveTools_A12_9.5_win",
-    "F:/UnlockTool-2026-11-05-0", "F:/UnlockTool_2026-10-31-0", "F:/TSM-PRO Edition"
-  ]
+  "installs": {
+    "first_run": true
+  }
 }

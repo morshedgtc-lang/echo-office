@@ -5,7 +5,9 @@ Budget, in milliseconds, from config/office.json:
     greeting   200    answered with no call at all
     identity   100    answered from facts on disk
     order      ...    planned and executed here, no model, verified on disk
+                       — with no tool for it, the cloud brain takes the order instead
     question  3000   one cloud call, or an honest line when no key is set
+    voice      ...    speech work, only when the owner switched the local model on
 """
 
 from __future__ import annotations
@@ -30,6 +32,17 @@ ORDER_VERBS = (
     "index", "backup", "restore", "sync", "monitor", "summarise", "summarize",
     "remember", "recall", "work", "show", "play", "say", "speak",
 )
+
+# The owner asking for speech: "record a voice note", "transcribe my clip",
+# "what did i say". Matching words are kept specific so that an order like
+# "record the price in memory" still runs as the order it is.
+VOICE_ORDER = re.compile(
+    r"\b(?:transcrib\w+|dictat\w+|speech\s+to\s+text|"
+    r"(?:voice|audio|speech)\s+(?:note|message|memo|clip)|"
+    r"record\s+(?:a\s+)?(?:voice|audio|speech|clip|memo)|"
+    r"listen\s+to\s+(?:me|my\s+voice)|what\s+(?:did\s+)?i\s+(?:said|say)|hear\s+me)\b",
+    re.I)
+
 
 class Answer:
     """One reply, with the fields the HUD and the log both want."""
@@ -92,6 +105,70 @@ def is_order(text: str) -> bool:
     return word in ORDER_VERBS
 
 
+def is_voice_order(text: str) -> bool:
+    """True when the owner wants speech turned into text on this PC.
+
+    That work needs the speech model, which is a downloaded asset and about 1 GB of
+    RAM once loaded, so the chat path only reaches for it behind the local-model
+    switch the owner controls (config/office.json -> providers.local_enabled).
+    """
+    return VOICE_ORDER.search(_strip_politeness((text or "").strip().lower())) is not None
+
+
+# ------------------------------------------------------------------ voice orders
+# The speech model is a downloaded asset that holds ~1 GB of RAM once loaded, and
+# the standing order is "no local model unless the owner turns it on". So this path
+# never imports epu.stt while that switch is off: a RECORD order must cost no RAM,
+# no download and no time, and must still say in one line what is missing.
+_VOICE_OFF = {
+    "en": ("Yes sir, the local model is off, so there is no speech model on this PC yet. "
+           "Say 'turn on the local model' and I will transcribe here, no cloud."),
+    "bn": ("হ্যাঁ স্যার, লোকাল মডেল বন্ধ, তাই এই পিসিতে এখন স্পিচ মডেল নেই। "
+           "'turn on the local model' বলুন — তাহলে ক্লাউড ছাড়া এখানেই ট্রান্সক্রাইব করব।"),
+    "hi": ("जी सर, लोकल मॉडल बंद है, इसलिए इस पीसी पर अभी स्पीच मॉडल नहीं है। "
+           "'turn on the local model' कहें — फिर बिना क्लाउड यहीं ट्रांसक्राइब करूँगा।"),
+}
+
+
+def _voice_answer(language: str) -> Answer:
+    """A RECORD/VOICE order, answered honestly in one line.
+
+    Refusal is reserved for genuinely destructive work; a missing speech model is
+    only a missing piece, so the line ends with what the owner can do about it.
+    """
+    if not config.local_model_enabled():
+        reply = _VOICE_OFF.get(language) or _VOICE_OFF["en"]
+        return Answer(reply, kind="voice", language=language)
+    from . import stt          # lazy: nothing is imported while the switch is off
+    reply = (f"Yes sir, speech is on: the {stt.STT_MODEL} model runs on this PC. "
+             f"Send me a clip on the voice button and I will transcribe it here, "
+             f"no cloud.")
+    return Answer(reply, kind="voice", provider="local", model=stt.STT_MODEL,
+                  language=language)
+
+
+def _brain(body: str, language: str, started: float, chat_id: str, scope: str,
+           mem: memory.Memory) -> Answer:
+    """The model's turn: one question, one answer, with the tool manifest in hand.
+
+    This is the one path that can cost money and seconds, so it is also the one path
+    allowed to be honest about being unable to answer (no key, nothing answered) —
+    and even then the reply names what is missing instead of refusing the order.
+    History is scope-filtered: one client's words never travel inside another's.
+    """
+    from . import brains
+
+    result = brains.ask(body, scope=scope, mem=mem,
+                        history=mem.recent(chat_id, 4, scope))
+    reply = result.get("reply") or ""
+    mem.add_chat(chat_id, "assistant", reply, scope)
+    return Answer(reply, kind="question",
+                  provider=result.get("provider", "office"),
+                  model=result.get("model", "rule"), language=language,
+                  ok=bool(result.get("ok")),
+                  ms=int((time.time() - started) * 1000))
+
+
 # ------------------------------------------------------------------ the answer
 def answer(text: str, *, chat_id: str = "hud", agent: str = "you",
            scope: str = "owner", mem: memory.Memory | None = None) -> dict:
@@ -137,33 +214,36 @@ def answer(text: str, *, chat_id: str = "hud", agent: str = "you",
             return finish(Answer(reply, kind="greeting", language=language,
                                  ms=int((time.time() - started) * 1000)))
 
-        # 4) an order — planned and executed here, verified on disk
-        if is_order(body) or engine.plan(body, scope=scope):
+        # 4) a RECORD/VOICE order — the speech model lives behind the local switch
+        if is_voice_order(body):
+            spoken = _voice_answer(language)
             mem.add_chat(chat_id, "owner", body, scope)
+            mem.add_chat(chat_id, "assistant", spoken.reply, scope)
+            spoken.ms = int((time.time() - started) * 1000)
+            return finish(spoken)
+
+        # 5) an order — planned and executed here, verified on disk
+        actions = engine.plan(body, scope=scope)
+        if is_order(body) or actions:
+            mem.add_chat(chat_id, "owner", body, scope)
+            if not actions:
+                # No tool in the office does this yet, and the owner's order still
+                # gets a real attempt: the cloud brain answers with the tool manifest
+                # in its system prompt, so it can plan around what the office has.
+                return finish(_brain(body, language, started, chat_id, scope, mem))
             result = engine.run(body, mem, scope=scope)
-            if result.get("reply"):
-                reply = result["reply"]
-            else:
-                reply = (f"Yes sir, I do not have a tool for that yet. Say 'remember that "
-                         f"...' or name the tool you want and I will build it.")
-                result["ok"] = False
+            reply = result.get("reply") or (
+                "Yes sir, I could not run that one here yet. Name the tool you want "
+                "and I will build it.")
             mem.add_chat(chat_id, "assistant", reply, scope)
             return finish(Answer(reply, kind="order", provider="tools", model="engine",
                                  language=language, tools=result.get("tools") or [],
                                  ok=bool(result.get("ok")),
                                  ms=int((time.time() - started) * 1000)))
 
-        # 5) a real question — the cloud brain, or an honest line without no key
+        # 6) a real question — the cloud brain, or an honest line without no key
         mem.add_chat(chat_id, "owner", body, scope)
-        from . import brains
-
-        result = brains.ask(body, scope=scope, mem=mem, history=mem.recent(chat_id, 4, scope))
-        reply = result.get("reply") or ""
-        mem.add_chat(chat_id, "assistant", reply, scope)
-        return finish(Answer(reply, kind="question", provider=result.get("provider", "office"),
-                             model=result.get("model", "rule"), language=language,
-                             ok=bool(result.get("ok")),
-                             ms=int((time.time() - started) * 1000)))
+        return finish(_brain(body, language, started, chat_id, scope, mem))
     except Exception as exc:  # a broken brain must never leave the owner with nothing
         return finish(Answer(f"Yes sir, something in the office broke: {exc}. "
                              f"Tell me to repair it and I will.", kind="error",

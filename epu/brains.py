@@ -8,6 +8,7 @@ is what made his PC slow. Without a key the office says so plainly and never pre
 from __future__ import annotations
 
 import json
+import os
 import time
 import urllib.error
 import urllib.request
@@ -155,6 +156,22 @@ def _ask_openai_compatible(engine: dict, model: str, prompt: str, history: list,
                 "provider": engine.get("id", "local"), "model": model}
 
 
+def tool_manifest() -> str:
+    """What the office can already do in code, for the model's system prompt.
+
+    A model that cannot see the tools answers "I cannot"; one that can see them
+    either does the part a tool covers or asks for the one missing piece. The prompt
+    is the only place the model ever learns what the office has, so it lists them.
+    """
+    from . import engine
+
+    names = sorted(name for name in engine.TOOLS if not name.startswith("_"))
+    return ("Tools the office already runs in code, no model needed: " + ", ".join(names)
+            + ". You may ask for a folder or file to be made in projects/, for memory "
+              "to be written or repaired, or for the PC, a site or security to be "
+              "checked. Anything else, do the part you can and say what is missing.")
+
+
 def system_prompt(scope: str, mem: memory.Memory | None, text: str) -> str:
     from . import rules
 
@@ -169,7 +186,9 @@ def system_prompt(scope: str, mem: memory.Memory | None, text: str) -> str:
         "say so plainly.",
         "Answer in simple short English. The owner is not a native English speaker.",
         "Do not repeat the same opening line. For a question, answer directly.",
+        tool_manifest(),
     ]
+    # Only this scope's own memory may reach the prompt: a scope is a wall.
     if mem is not None:
         context = mem.context(text, scope=scope, max_chars=700)
         if context:

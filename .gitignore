@@ -4,6 +4,12 @@ run/
 logs/
 tmp/
 
+# client work — never committed. The repo is public, so projects/ (client folders,
+# notes, reports) must stay on this machine. projects/.gitkeep is the one exception,
+# so the folder exists after a fresh clone.
+projects/*
+!projects/.gitkeep
+
 # memory databases (regenerable, but the owner may want to keep them)
 memory/*.sqlite
 memory/*.sqlite-wal

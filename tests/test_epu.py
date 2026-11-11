@@ -21,8 +21,21 @@ sys.path.insert(0, str(ROOT))
 TMP = Path(tempfile.mkdtemp(prefix="epu-test-"))
 os.environ["EPU_ROOT"] = str(TMP)          # reserved for future subprocess runs
 
+
+def _installed(name: str) -> bool:
+    """Optional dependencies are detected, never assumed: a missing one is a skip."""
+    import importlib.util
+
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError):      # pragma: no cover - a broken install
+        return False
+
+
+HAVE_NUMPY = _installed("numpy")
+
 import epu.config as config          # noqa: E402
-from epu import memory, rules         # noqa: E402
+from epu import brains, memory, rules         # noqa: E402
 
 
 def fresh(tmp: Path | None = None) -> memory.Memory:
@@ -187,6 +200,97 @@ class T04_Rules(unittest.TestCase):
         line = rules.quick_reply(language="en")
         self.assertEqual(line.count("Yes"), 1)
         self.assertTrue(line.startswith("Yes sir, EPU here"))
+
+
+class T05_NoDownloadedModels(unittest.TestCase):
+    """The chat path must never need a downloaded model, a key or the network."""
+
+    def test_a_record_order_never_loads_the_speech_model(self):
+        """The speech model is ~1 GB of RAM: it may not load for a chat order."""
+        import sys
+
+        from epu import chat
+
+        mem = fresh()
+        before = set(sys.modules)
+        answer = chat.answer("record a voice note", mem=mem)
+        self.assertIn("turn on the local model", answer["reply"])
+        self.assertNotIn("epu.stt", set(sys.modules) - before)
+        self.assertNotIn("faster_whisper", set(sys.modules) - before)
+        mem.close()
+
+    @unittest.skipUnless(HAVE_NUMPY, "numpy is not installed: the speech path skips")
+    def test_speech_stays_off_until_the_owner_turns_it_on(self):
+        local = os.environ.get("EPU_LOCAL")
+        os.environ.pop("EPU_LOCAL", None)
+        config.reset_cache()
+        try:
+            self.assertFalse(config.local_model_enabled())
+            from epu import chat
+
+            mem = fresh()
+            self.assertIn("turn on the local model",
+                          chat.answer("record a voice note", mem=mem)["reply"])
+            os.environ["EPU_LOCAL"] = "1"
+            config.reset_cache()
+            self.assertTrue(config.local_model_enabled())
+            answer = chat.answer("record a voice note", mem=mem)
+            self.assertIn("speech is on", answer["reply"])
+            self.assertEqual(answer["model"], "base")
+            mem.close()
+        finally:
+            os.environ.pop("EPU_LOCAL", None)
+            if local is not None:
+                os.environ["EPU_LOCAL"] = local
+            config.reset_cache()
+
+    def test_the_chat_path_imports_no_heavy_model(self):
+        """numpy, cv2 and the speech model are all absent after a whole conversation."""
+        import subprocess
+        import sys
+
+        code = ("import sys; from epu import chat; "
+                "chat.answer('hi'); chat.answer('who am i'); "
+                "chat.answer('record a voice note'); "
+                "print([m for m in sys.modules if m.split('.')[0] in "
+                "('numpy', 'cv2', 'faster_whisper', 'whisper') or m.startswith('epu.stt')])")
+        out = subprocess.run([sys.executable, "-c", code], cwd=str(ROOT),
+                             capture_output=True, text=True, timeout=120)
+        self.assertEqual(out.returncode, 0, out.stderr[-2000:])
+        self.assertEqual(out.stdout.strip(), "[]", out.stdout)
+
+
+class T06_CloudRouter(unittest.TestCase):
+    """The brain that answers when code has no tool: honest, scoped, never invented."""
+
+    def test_the_local_brain_does_not_crash_the_process(self):
+        """EPU_LOCAL=1 used to die on a missing `os` import: the owner must get a reply."""
+        local = os.environ.get("EPU_LOCAL")
+        os.environ["EPU_LOCAL"] = "1"
+        config.reset_cache()
+        for name in ("EPU_NVIDIA_KEY_1", "EPU_NVIDIA_KEY_2"):
+            os.environ.pop(name, None)
+        mem = fresh()
+        try:
+            brains._fused.clear()
+            result = brains.ask("hello", mem=mem)
+            self.assertIn(result["provider"], ("office", "openjarvis"))
+            self.assertTrue(result["reply"])
+            self.assertNotIn("name 'os' is not defined", result["reply"])
+        finally:
+            os.environ.pop("EPU_LOCAL", None)
+            if local is not None:
+                os.environ["EPU_LOCAL"] = local
+            config.reset_cache()
+            mem.close()
+
+    def test_no_key_is_said_plainly_with_one_action_to_take(self):
+        for name in ("EPU_NVIDIA_KEY_1", "EPU_NVIDIA_KEY_2"):
+            os.environ.pop(name, None)
+        result = brains.ask("what is the wifi code", mem=fresh())
+        self.assertIn("no cloud key", result["reply"])
+        self.assertIn("secure/keys.env", result["reply"])
+        self.assertFalse(result["ok"])
 
 
 if __name__ == "__main__":

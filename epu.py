@@ -5,10 +5,13 @@
     python epu.py order "..."   run one order the way the HUD would
     python epu.py memory        memory numbers (honest)
     python epu.py repair        "fix your memory": check and repair, real report
+    python epu.py backup        copy the memory into a verified backup (one command)
+    python epu.py backups       what backups are on disk, with their real numbers
+    python epu.py restore <f>   put one backup back (refuses a stale one without --force)
     python epu.py doctor        is the office healthy? one screen
 
-No cloud call happens in any of these except `order`, and `whoami`/`memory`/`repair`
-never touch the network at all.
+No cloud call happens in any of these except `order`, and `whoami`/`memory`/`repair`/
+`backup`/`backups`/`restore` never touch the network at all.
 """
 
 from __future__ import annotations
@@ -83,6 +86,52 @@ def cmd_repair(_args: list[str]) -> int:
         for line in report["problems"]:
             print(f"    - {line}")
     return 0 if report["ok"] else 1
+
+
+def cmd_backup(_args: list[str]) -> int:
+    """One command, one verified backup: the owner's memory is one disk away from
+    being a stranger to his own office, and that is the whole point of this."""
+    from epu import backup
+
+    result = backup.backup()
+    if not result["ok"]:
+        print(f"Could not back up the memory, sir: {result['error']}")
+        return 1
+    print(f"Memory backed up, sir: {result['facts']} fact(s), "
+           f"{result['bytes']:,} bytes, taken {result['when']}.")
+    print(f"  {result['path']}")
+    print("  (verified: the copy opened and counted the same facts)")
+    return 0
+
+
+def cmd_backups(_args: list[str]) -> int:
+    from epu import backup
+
+    rows = backup.list_backups()
+    print(f"{len(rows)} backup(s) on disk, sir:")
+    for row in rows:
+        facts = f"{row['facts']} facts" if row["facts"] is not None else "unverified"
+        print(f"  {row['when']}  {row['bytes']:>10,} bytes  {facts:>12}  {row['name']}")
+    if not rows:
+        print(f"  none yet - make one with: python epu.py backup   (folder: {backup.BACKUP_DIR})")
+    return 0
+
+
+def cmd_restore(args: list[str]) -> int:
+    from epu import backup
+
+    files = [a for a in args if not a.startswith("-")]
+    if not files:
+        print('Say it as: python epu.py restore backups/office-2026-01-01T09-00-00.zip '
+              '[--force]')
+        return 2
+    result = backup.restore(files[0], force="--force" in args)
+    if not result["ok"]:
+        print(f"Memory not restored, sir: {result['error']}")
+        return 1
+    print(f"Memory restored, sir: {result['facts']} fact(s) from "
+           f"{Path(result['path']).name} (taken {result['when']}).")
+    return 0
 
 
 def cmd_doctor(_args: list[str]) -> int:
@@ -175,6 +224,7 @@ COMMANDS = {
     "init": cmd_init, "whoami": cmd_whoami, "memory": cmd_memory,
     "repair": cmd_repair, "doctor": cmd_doctor, "order": cmd_order,
     "serve": cmd_serve, "passphrase": cmd_passphrase,
+    "backup": cmd_backup, "backups": cmd_backups, "restore": cmd_restore,
 }
 
 if __name__ == "__main__":

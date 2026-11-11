@@ -529,10 +529,16 @@ def run(text: str, mem: memory.Memory, scope: str = "owner") -> dict:
             return {"ok": False, "error": f"tool not wired: {tool}", "tools": [t for t, *_ in done]}
         result = fn(mem, args)
         if not result.get("ok"):
-            return {"ok": False, "tool": tool, "error": result.get("error") or "failed",
-                    "reply": f"Yes sir, I tried {tool} but it failed: "
-                             f"{result.get('error') or 'failed'}. Tell me to fix it and I "
-                             f"will build what is missing.",
+            why = result.get("error") or "failed"
+            if tool == "_refuse":
+                # A protected-folder order is stopped in code before anything runs.
+                # The reason already ends with what the owner can do instead, so the
+                # reply is one line and no boilerplate is added on top of it.
+                reply = f"Yes sir, {why}"
+            else:
+                reply = (f"Yes sir, I tried {tool} but it failed: {why}. "
+                         f"Tell me to fix it and I will build what is missing.")
+            return {"ok": False, "tool": tool, "error": why, "reply": reply,
                     "tools": [t for t, *_ in done],
                     "ms": int((time.time() - started) * 1000)}
         done.append((tool, result, args))
