@@ -308,6 +308,21 @@ def _tool_memory_repair(mem: memory.Memory, _args: dict) -> dict:
     return {"ok": True, **mem.repair()}
 
 
+def _tool_pc_health(mem: memory.Memory, _args: dict) -> dict:
+    """Real machine numbers from Windows itself."""
+    from . import sysmon
+
+    info = sysmon.report()
+    mem.log_job("pc_health", True, "")
+    return {"ok": True, **info}
+
+
+def _describe_pc(result: dict) -> str:
+    from . import sysmon
+
+    return sysmon.describe(result)
+
+
 TOOLS = {
     "make_folder": _tool_make_folder,
     "write_file": _tool_write_file,
@@ -320,6 +335,7 @@ TOOLS = {
     "memory_repair": _tool_memory_repair,
     "check_site": _tool_check_site,
     "list_sites": _tool_list_sites,
+    "pc_health": _tool_pc_health,
     # A protected-folder order is refused in code, before any tool runs: the owner
     # gets the reason, and nothing is claimed or touched.
     "_refuse": lambda mem, args: {"ok": False, "error": args.get("why", "not allowed")},
@@ -367,6 +383,8 @@ def describe(tool: str, result: dict, args: dict) -> str:
         return f"remembered (memory #{result.get('id')})"
     if tool == "system_info":
         return f"memory holds {result['memory']['facts']} facts"
+    if tool == "pc_health":
+        return _describe_pc(result)
     if tool == "memory_repair":
         fixed, problems = result.get("fixed") or [], result.get("problems") or []
         return ("memory checked, sir: " + (f"{result.get('stats', {}).get('facts')} facts. "

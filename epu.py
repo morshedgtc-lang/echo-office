@@ -115,31 +115,41 @@ def cmd_order(args: list[str]) -> int:
 
 
 def cmd_serve(args: list[str]) -> int:
-    """Start the office. --lan opens it to the owner's devices on the same WiFi."""
-    from epu import api
+    """Start the office. --lan opens it to the owner's devices on the same WiFi,
+    --tls serves https so those devices may use the camera and the microphone."""
+    from epu import api, tlsutil
 
     lan = "--lan" in args or os.environ.get("EPU_BIND") == "0.0.0.0" or "--bind" in args
     if lan and config.bind() != "0.0.0.0":
         os.environ["EPU_BIND"] = "0.0.0.0"
         config.reset_cache()
-    elif "--local" in args:
+    elif "--local" in args or not lan:
         os.environ["EPU_BIND"] = "127.0.0.1"
         config.reset_cache()
+    use_tls = "--tls" in args or os.environ.get("EPU_TLS") == "1"
     host = os.environ.get("EPU_BIND") or config.bind()
     port = config.port("hud")
     if api.already_running("127.0.0.1", port):
-        print(f"EPU is already running, sir: http://127.0.0.1:{port}/")
+        print(f"EPU is already running, sir: http{'s' if use_tls else ''}://127.0.0.1:{port}/")
         return 0
     try:
         server = api.build_server(host, port)
     except OSError as exc:
         print(f"cannot start on {host}:{port} - {exc}")
         return 1
-    url = f"http://{host}:{port}/"
+    scheme = "http"
+    if use_tls:
+        if tlsutil.wrap(server) is None:
+            print("TLS certificate could not be made - starting plain http instead, sir")
+            print("(the laptop browser will then refuse the camera/mic; run from the PC)")
+        else:
+            scheme = "https"
+    url = f"{scheme}://{host}:{port}/"
     print(f"EPU online at {url}  (Ctrl+C to stop)")
     if host == "0.0.0.0":
-        print("LAN mode, sir: your laptop reaches it at "
-              "http://<this PC's IP>:" + str(port) + "/ and must enter the passphrase.")
+        lan_ip = "this PC's IP"
+        print(f"LAN mode, sir: your laptop opens http{'s' if scheme == 'https' else ''}"
+              f"://{lan_ip}:{port}/ and must accept the certificate once.")
     if not api.passphrase_set():
         print("No passphrase yet - set one with: python epu.py passphrase")
     try:

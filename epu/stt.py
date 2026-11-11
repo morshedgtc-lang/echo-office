@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import io
 import math
+import os
 import re
 import wave
 from dataclasses import dataclass, field
@@ -31,6 +32,12 @@ N_MELS = 26
 N_MFCC = 13
 MIN_SPEECH_SECONDS = 0.4
 MAX_CLIP_SECONDS = 30
+
+# Speech model size, for the machine the office runs on. The owner's PC is an
+# i5-8365U with 8 GB RAM, so the default is "base" (145 MB, ~1 GB RAM while
+# transcribing). "small" is more accurate and needs 461 MB + about 2 GB.
+# EPU_STT_MODEL=tiny|base|small|medium overrides it.
+STT_MODEL = os.environ.get("EPU_STT_MODEL", "base")
 
 
 class VoiceUnavailable(RuntimeError):
@@ -198,8 +205,9 @@ def transcribe(data: bytes, language: str | None = None) -> dict:
         raise VoiceUnavailable("faster-whisper is not installed") from exc
     global _whisper
     if _whisper is None:
-        # "small" is the honest size for a CPU: faster models mistake short orders.
-        _whisper = WhisperModel("small", device="cpu", compute_type="int8")
+        # int8 on the CPU: the owner's machine is an 8 GB laptop, so this is the
+        # honest trade - accurate enough for short orders, light enough to run.
+        _whisper = WhisperModel(STT_MODEL, device="cpu", compute_type="int8")
     segments, info = _whisper.transcribe(
         audio.astype(np.float32), language=language, vad_filter=True,
         beam_size=1)
