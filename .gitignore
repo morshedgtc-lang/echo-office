@@ -20,3 +20,9 @@ venv/
 .idea/
 Thumbs.db
 desktop.ini
+
+*.zip
+tmp/
+.pytest_cache/
+logs/
+run/
