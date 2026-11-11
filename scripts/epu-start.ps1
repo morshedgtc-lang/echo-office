@@ -34,6 +34,17 @@ function Open-Hud([string]$url) {
         "import webbrowser; webbrowser.open('$url')"
 }
 
+function Show-LanUrl {
+    # The phone address, printed only when the office is open to the LAN.
+    $ip = (Get-NetIPAddress -AddressFamily IPv4 |
+           Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } |
+           Select-Object -First 1).IPAddress
+    if ($ip) {
+        Write-Host "On your phone (same WiFi): ${scheme}://${ip}:${port}/  " `
+            "- accept the certificate once (Advanced -> Proceed)."
+    }
+}
+
 # ---------------------------------------------------------------- the firewall rule
 if ($Firewall) {
     # One click, one admin prompt (that is Windows, not EPU). Private profile only:
@@ -48,7 +59,8 @@ if ($Firewall) {
 # ---------------------------------------------------------------- start + open
 if (Test-Port $port) {
     Open-Hud "${scheme}://127.0.0.1:${port}/"
-    if ($Lan) { Write-Host "EPU is already running, sir. The HUD is open." }
+    if ($Lan) { Show-LanUrl }
+    Write-Host "EPU is already running, sir. The HUD is open."
     exit 0
 }
 
@@ -60,15 +72,7 @@ for ($i = 0; $i -lt 30; $i++) {
     Start-Sleep -Milliseconds 400
     if (Test-Port $port) {
         Open-Hud "${scheme}://127.0.0.1:${port}/"
-        if ($Lan) {
-            $ip = (Get-NetIPAddress -AddressFamily IPv4 |
-                   Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } |
-                   Select-Object -First 1).IPAddress
-            if ($ip) {
-                Write-Host "On your phone (same WiFi): ${scheme}://${ip}:${port}/  " `
-                    "- accept the certificate once (Advanced -> Proceed)."
-            }
-        }
+        if ($Lan) { Show-LanUrl }
         exit 0
     }
 }
