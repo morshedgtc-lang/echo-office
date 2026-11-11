@@ -78,6 +78,12 @@
     }
   },
 
+  "automation": {
+    "base": "http://127.0.0.1:8080",
+    "timeout_s": 30,
+    "note": "ActivePieces (or any webhook engine): optional hands for EPU, off until it runs"
+  },
+
   "installs": {
     "first_run": true
   }

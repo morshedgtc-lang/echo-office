@@ -57,7 +57,13 @@ _SECURITY = re.compile(
     r"who\s+is\s+(?:watching|listening)\s+(?:me|my\s+pc)|am\s+i\s+safe)", re.I)
 _SITE = re.compile(
     r"^(?:please\s+)?(?:check|test|scan|is|how\s+is)\s+(?:my\s+)?"
-    r"(?:site|website|domain)\s+(?P<host>[a-z0-9.-]+\.[a-z]{2,})", re.I)
+    r"(?:site|website|domain|page)\s+(?P<host>[a-z0-9.-]+\.[a-z]{2,})", re.I)
+_FLOW = re.compile(
+    r"^(?:please\s+)?(?:run|trigger|start|fire)\s+(?:the\s+)?flow\s+[\"']?(?P<flow>[\w.-]+)[\"']?"
+    r"(?:\s+(?:with|sending|payload)\s+(?P<payload>\{.*\}))?$", re.I)
+_AUTOMATION = re.compile(
+    r"^(?:please\s+)?(?:is\s+)?(?:automation|activepieces|the\s+automation\s+engine)"
+    r"(?:\s+(?:up|running|ready|status))?$", re.I)
 _SITES = re.compile(r"^(?:please\s+)?(?:list|show)\s+(?:my\s+)?(?:sites?|websites?|clients?)\s*$",
                     re.I)
 _SECURITY = re.compile(
@@ -109,6 +115,56 @@ def _allowed_to_read(rel: str) -> bool:
     """
     top = rel.replace("\\", "/").lstrip("/").split("/")[0] if rel else ""
     return top in tuple(policy()["read_roots"])
+
+
+def code_roots() -> dict[str, str]:
+    """Where each client's real work lives: slug -> folder. Configured by the owner."""
+    out = {}
+    for slug, project in config.projects().items():
+        root = project.get("code_root")
+        if root:
+            out[slug] = str(root).replace("\\", "/").rstrip("/")
+    return out
+
+
+def _inside_any_code_root(path: Path, slug: str | None = None) -> str | None:
+    """The slug of the project folder this path lives in, or None."""
+    for project_slug, root in code_roots().items():
+        if slug and project_slug != slug:
+            continue
+        base = Path(root).resolve()
+        try:
+            path.resolve().relative_to(base)
+            return project_slug
+        except ValueError:
+            continue
+    return None
+
+
+def resolve_target(raw: str, scope: str = "owner") -> tuple[Path, str] | None:
+    """Where an order's file path really points, and the project it belongs to.
+
+    A path is either inside the office (existing read/write roots), or inside a
+    client's code folder from config. `.git` is never touched either way.
+    """
+    raw = (raw or "").strip().strip("\"'")
+    if not raw:
+        return None
+    if raw.lower().startswith((".git", ".git/")) or "/.git/" in raw.replace("\\", "/"):
+        return None
+    scope_slug = scope.split(":", 1)[1] if scope.startswith("client:") else None
+    for slug, root in code_roots().items():
+        prefix = root.lower().rstrip("/") + "/"
+        low = raw.replace("\\", "/").lower()
+        if low.startswith(prefix) or low.rstrip("/") == root.lower():
+            rel = raw.replace("\\", "/")[len(prefix):] if low.startswith(prefix) else ""
+            if scope_slug and scope_slug != slug:
+                return None
+            return Path(root) / rel if rel else Path(root), slug
+    rel = raw
+    if not _allowed_to_read(rel) and rel.split("/")[0] not in tuple(policy()["write_roots"]):
+        return None
+    return config.ROOT / rel, "office"
 
 
 def _location_free(text: str) -> str:
