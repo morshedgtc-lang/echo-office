@@ -49,6 +49,11 @@ _FIX = re.compile(
     r"(?P<target>[a-z][\w\s./-]{0,40}?)\s*[.!]?$"
     r"|^(?:please\s+)?(?:your\s+|the\s+)?(?P<bare>memory|brain)\s+(?:is\s+)?"
     r"(?:broken|not\s+working)\s*[.!]?$", re.I)
+_SITE = re.compile(
+    r"^(?:please\s+)?(?:check|test|scan|is|how\s+is)\s+(?:my\s+)?"
+    r"(?:site|website|domain)\s+(?P<host>[a-z0-9.-]+\.[a-z]{2,})", re.I)
+_SITES = re.compile(r"^(?:please\s+)?(?:list|show)\s+(?:my\s+)?(?:sites?|websites?|clients?)\s*$",
+                    re.I)
 _MEMORY_TARGETS = {"memory", "your memory", "my memory", "the memory", "brain", "your brain",
                    "memory index", "the memory index", "the search index", "search index",
                    "the database", "database", "short term memory", "chat memory"}
@@ -154,6 +159,11 @@ def plan(text: str, scope: str = "owner") -> list[dict]:
         if target in _MEMORY_TARGETS or "memory" in target or "brain" in target:
             return [{"tool": "memory_repair", "args": {}}]
         return []
+    m = _SITE.match(t)
+    if m:
+        return [{"tool": "check_site", "args": {"host": m.group("host")}}]
+    if _SITES.match(t):
+        return [{"tool": "list_sites", "args": {}}]
     return []
 
 
@@ -241,18 +251,57 @@ def _tool_remember(mem: memory.Memory, args: dict) -> dict:
 
 
 def _tool_system_info(mem: memory.Memory, _args: dict) -> dict:
-    info = {}
-    if hasattr(os_cpu := __import__("os").statvfs, "__call__"):  # POSIX only, best effort
-        pass
-    try:
-        load = Path("/proc/loadavg")
-        if load.exists():
-            info["load_1m"] = float(load.read_text().split()[0])
-    except OSError:
-        pass
     mem.log_job("system_info", True, "")
     stats = mem.stats()
-    return {"ok": True, "info": info, "memory": stats}
+    return {"ok": True, "memory": stats}
+
+
+def _tool_check_site(mem: memory.Memory, args: dict) -> dict:
+    """Real site check over the network: DNS, HTTP status, response time, expiry."""
+    import ssl
+    import socket
+    import urllib.request
+
+    host = str(args.get("host") or "").strip().lower()
+    if not host or not re.match(r"^[a-z0-9.-]+\.[a-z]{2,}$", host):
+        return {"ok": False, "error": f"not a domain I can check: {host}"}
+    report: dict = {"ok": True, "host": host, "dns": [], "ip": [], "status": None,
+                    "seconds": None, "tls_expires": None, "problems": []}
+    try:
+        report["ip"] = sorted({info[4][0] for info in socket.getaddrinfo(
+            host, 443, proto=socket.IPPROTO_TCP) if info[4]})
+    except socket.gaierror as exc:
+        report["problems"].append(f"DNS: {exc}")
+        report["ok"] = False
+    started = time.time()
+    try:
+        request = urllib.request.Request(f"https://{host}",
+                                         headers={"User-Agent": "EPU office check"})
+        with urllib.request.urlopen(request, timeout=15) as response:
+            report["status"] = response.status
+            report["seconds"] = round(time.time() - started, 2)
+    except Exception as exc:
+        report["seconds"] = round(time.time() - started, 2)
+        report["problems"].append(f"https: {exc}")
+        report["ok"] = False
+    try:
+        context = ssl.create_default_context()
+        with socket.create_connection((host, 443), timeout=10) as sock:
+            with context.wrap_socket(sock, server_hostname=host) as tls:
+                report["tls_expires"] = tls.getpeercert().get("notAfter")
+    except Exception:
+        pass
+    mem.log_job("check_site", report["ok"], host)
+    return report
+
+
+def _tool_list_sites(mem: memory.Memory, _args: dict) -> dict:
+    rows = []
+    for slug, project in config.projects().items():
+        rows.append({"slug": slug, "title": project.get("title") or slug,
+                     "site": project.get("site", "-"),
+                     "folder": project.get("path", "-")})
+    return {"ok": True, "sites": rows}
 
 
 def _tool_memory_repair(mem: memory.Memory, _args: dict) -> dict:
@@ -269,6 +318,8 @@ TOOLS = {
     "remember": _tool_remember,
     "system_info": _tool_system_info,
     "memory_repair": _tool_memory_repair,
+    "check_site": _tool_check_site,
+    "list_sites": _tool_list_sites,
     # A protected-folder order is refused in code, before any tool runs: the owner
     # gets the reason, and nothing is claimed or touched.
     "_refuse": lambda mem, args: {"ok": False, "error": args.get("why", "not allowed")},
@@ -322,6 +373,18 @@ def describe(tool: str, result: dict, args: dict) -> str:
                 + ("I fixed: " + "; ".join(fixed) + "."
                    if fixed else "Nothing needed fixing.")
                 + ((" Left open: " + "; ".join(problems) + ".") if problems else "")))
+    if tool == "check_site":
+        host = result.get("host")
+        if result.get("ok"):
+            return (f"{host} is up: HTTP {result['status']} in {result['seconds']}s, "
+                    f"IPs {', '.join(result['ip'] or []) or 'n/a'}, certificate valid to "
+                    f"{result.get('tls_expires') or 'unknown'}")
+        return (f"{host} is DOWN: " + ("; ".join(result.get("problems") or ["unknown"]))
+                + ". I am not guessing - want me to check DNS or the hosting?")
+    if tool == "list_sites":
+        sites = result.get("sites") or []
+        return ", ".join(f"{s['title']} ({s['site']}) in {s['folder']}" for s in sites) \
+            if sites else "no sites recorded yet, sir"
     return f"{tool} done"
 
 

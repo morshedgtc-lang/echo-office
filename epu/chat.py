@@ -30,7 +30,6 @@ ORDER_VERBS = (
     "remember", "recall", "work", "show", "play", "say", "speak",
 )
 
-
 class Answer:
     """One reply, with the fields the HUD and the log both want."""
 
