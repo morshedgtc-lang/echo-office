@@ -30,7 +30,7 @@ $load = $null
   boot_time      = $os.LastBootUpTime.ToString('yyyy-MM-dd HH:mm')
   processes      = (Get-Process).Count
   battery        = $null
-}
+} | ConvertTo-Json -Compress -Depth 3
 """
 
 
@@ -71,11 +71,12 @@ def epu_cost() -> dict:
 
 def report() -> dict:
     """One page for the HUD and for 'check my pc'."""
-    info = machine()
-    info["epu"] = epu_cost()
+    machine_info = machine()
+    epu = epu_cost()
     return {
-        "machine": info,
-        "light": _is_light(info.get("epu") or {}),
+        "machine": machine_info,
+        "epu": epu,
+        "light": _is_light(epu),
     }
 
 
@@ -92,7 +93,7 @@ def describe(info: dict) -> str:
     ram_free = machine_.get("ram_free_gb")
     ram_total = machine_.get("ram_total_gb")
     disks = machine_.get("disks") or []
-    disk_text = ", ".join(f"{d['name']}: {d['free_gb']} GB free of {d['total_gb']}"
+    disk_text = ", ".join(f"{d['name'].rstrip(':')}: {d['free_gb']} GB free of {d['total_gb']}"
                           for d in disks[:3])
     cost = ""
     if epu:

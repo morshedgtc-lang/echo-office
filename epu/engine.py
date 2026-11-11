@@ -33,8 +33,10 @@ _READ = re.compile(
     r"^(?:please\s+)?(?:read|open|show)\s+(?:me\s+)?(?:the\s+)?(?:file\s+)?"
     r"(?P<path>[\w./\\-]+\.[a-z0-9]{1,6})\s*\??$", re.I)
 _SYSTEM = re.compile(
-    r"\b(?:system\s*(?:info|status|health|report)|how\s+is\s+(?:the\s+)?(?:pc|computer|system)|"
-    r"check\s+(?:the\s+)?(?:pc|computer|system|health))", re.I)
+    r"\b(?:system\s*(?:info|status|health|report)|how\s+is\s+(?:my\s+|the\s+)?(?:pc|computer|system)|"
+    r"check\s+(?:my\s+|the\s+)?(?:pc|computer|system|health|ram)|"
+    r"(?:pc|computer|system)\s+(?:info|status|health|ram|slow)|"
+    r"my\s+pc|is\s+my\s+pc\s+sick)", re.I)
 _FIND = re.compile(
     r"^(?:please\s+)?(?:find|search|look\s+for)\s+(?:the\s+)?(?:files?\s+)?"
     r"(?:called\s+|named\s+)?[\"']?(?P<pattern>[\w.*?\[\]-]+)[\"']?"
@@ -164,7 +166,7 @@ def plan(text: str, scope: str = "owner") -> list[dict]:
         return [{"tool": "list_dir", "args": {"path": clean_path(m.group("path"), "projects"),
                                              "scope": scope}}]
     if _SYSTEM.search(t):
-        return [{"tool": "system_info", "args": {}}]
+        return [{"tool": "pc_health", "args": {}}]
     m = _FIND.match(t)
     if m:
         return [{"tool": "search_files", "args": {"pattern": m.group("pattern"),
