@@ -257,12 +257,20 @@ class T12_OneVoice(unittest.TestCase):
             time.sleep(0.02)
         return False
 
+    def _talking(self) -> bool:
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            if tts.talking():
+                return True
+            time.sleep(0.02)
+        return False
+
     def test_a_new_reply_kills_the_voice_that_is_still_talking(self):
         tts.say("a long reply that would take a while to finish", wait=False)
         first = self._child(0)
         self.assertIsNotNone(first, "the office never started a voice")
         self.assertIsNone(first.poll(), "the first utterance was not still talking")
-        self.assertTrue(tts.talking())
+        self.assertTrue(self._talking(), "the office never registered the voice")
 
         tts.say("second, newer reply", wait=False)
         second = self._child(1)
@@ -403,6 +411,20 @@ class T13_MemoryBackup(unittest.TestCase):
         self.assertFalse(refused["ok"], refused)
         self.assertIn("no office.sqlite", refused["error"])
 
+    def test_a_backup_of_some_other_database_is_refused(self):
+        import sqlite3
+
+        stranger = self.tmp / "stranger.sqlite"
+        other = sqlite3.connect(str(stranger))
+        other.execute("CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)")
+        other.execute("INSERT INTO notes (body) VALUES ('someone else''s file')")
+        other.commit()
+        other.close()
+        made = backup.backup(stranger, dest=self.share)
+        self.assertFalse(made["ok"], made)
+        self.assertIn("not an EPU memory database", made["error"])
+        self.assertFalse(list(self.share.glob("*.zip")))
+
     def test_list_backups_reports_names_created_times_and_facts(self):
         backup.backup(self.db, dest=self.share)
         self.mem.remember("one more fact, for a second backup")
@@ -423,6 +445,26 @@ class T13_MemoryBackup(unittest.TestCase):
         self.assertEqual([row["facts"] for row in rows], [4, 3])   # newest first
         self.assertEqual([row["created"] for row in rows],
                          sorted([row["created"] for row in rows], reverse=True))
+
+    def test_a_backup_catches_facts_still_in_the_write_ahead_log(self):
+        """The newest writes sit in the -wal/-shm sidecars, so a plain file copy of
+        office.sqlite loses the last fact the owner spoke. The backup does not."""
+        still_running = memory.Memory(self.db)          # the office, mid-conversation
+        still_running.remember("a fact spoken a second ago", trust="owner")
+        shutil.copyfile(self.db, self.tmp / "raw-copy.sqlite")     # the naive copy
+
+        made = backup.backup(self.db, dest=self.share)
+        self.assertTrue(made["ok"], made)
+        self.assertEqual(made["facts"], 4)
+        self.mem.close()
+        still_running.close()
+
+        with memory.Memory(self.tmp / "raw-copy.sqlite") as naive:
+            self.assertLess(naive.stats()["facts"], 4)
+        put_back = backup.restore(made["path"], target=self.tmp / "restored.sqlite")
+        self.assertTrue(put_back["ok"], put_back)
+        with memory.Memory(self.tmp / "restored.sqlite") as again:
+            self.assertEqual(again.stats()["facts"], 4)
 
     def test_a_missing_database_is_an_honest_failure(self):
         result = backup.backup(self.tmp / "not-there.sqlite", dest=self.share)

@@ -183,7 +183,11 @@ def _snapshot(source: Path, folder: Path) -> tuple[int, Path]:
             dst = sqlite3.connect(str(copy), timeout=5)
             try:
                 src.backup(dst)
-                facts = int(dst.execute("SELECT COUNT(*) FROM facts").fetchone()[0])
+                try:
+                    facts = int(dst.execute("SELECT COUNT(*) FROM facts").fetchone()[0])
+                except sqlite3.Error as exc:
+                    raise BackupError(f"{source.name} is not an EPU memory "
+                                      f"database (no facts table): {exc}")
                 state = dst.execute("PRAGMA integrity_check").fetchone()[0]
                 dst.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             finally:
@@ -335,7 +339,11 @@ def _verify(payload: bytes, folder: Path) -> dict:
         finally:
             db.close()
     except sqlite3.Error as exc:
-        return {"ok": False, "error": f"the backup will not open as a database: {exc}"}
+        # A readable file that is not one of ours: a random database, a half-written
+        # copy, an old build's file. It is refused, not guessed at.
+        why = ("the backup is not an EPU memory database" if "no such table" in str(exc)
+               else "the backup will not open as a database")
+        return {"ok": False, "error": f"{why}: {exc}"}
     finally:
         _drop_sidecars(probe)
         probe.unlink(missing_ok=True)
